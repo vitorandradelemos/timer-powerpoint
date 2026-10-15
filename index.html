@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PowerPoint Timer Add-in</title>
+  <!-- SDK Oficial da Microsoft para Office Add-ins -->
+  <script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@700;800&display=swap');
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: transparent;
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    .mono-digits {
+      font-family: 'JetBrains Mono', monospace;
+      font-variant-numeric: tabular-nums;
+    }
+
+    @keyframes pulse-urgent {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.03); opacity: 0.75; }
+    }
+
+    .urgent-blink {
+      animation: pulse-urgent 1s infinite ease-in-out;
+    }
+  </style>
+</head>
+<body class="w-screen h-screen flex flex-col items-center justify-center p-3">
+
+  <!-- BARRA DE SIMULAÇÃO (Aparece apenas fora do PowerPoint para você testar no navegador) -->
+  <div id="browserSimulatorBar" class="fixed top-2 left-2 right-2 bg-amber-950/90 border border-amber-500/40 text-amber-200 px-3 py-1.5 rounded-lg flex items-center justify-between text-xs shadow-lg z-50">
+    <div class="flex items-center gap-2">
+      <i class="fa-solid fa-flask text-amber-400"></i>
+      <span><strong>Modo Teste no Navegador:</strong> Simule a troca de tela do PowerPoint</span>
+    </div>
+    <button id="btnToggleSimulatedMode" class="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3 py-1 rounded transition">
+      Simular Modo Apresentação (F5)
+    </button>
+  </div>
+
+  <!-- ==========================================
+       1. MODO DE EDIÇÃO (Configuração no Slide)
+       ========================================== -->
+  <div id="editView" class="w-full max-w-md bg-slate-900 border border-slate-700/80 rounded-2xl p-5 text-white shadow-2xl transition-all">
+    <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-lg bg-indigo-600 flex items-center justify-center text-white">
+          <i class="fa-solid fa-clock"></i>
+        </div>
+        <div>
+          <h1 class="text-sm font-bold leading-tight">Configuração do Timer</h1>
+          <p class="text-[11px] text-slate-400">Modo de Edição do Slide</p>
+        </div>
+      </div>
+      <span id="saveStatus" class="text-[11px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-0.5 rounded-full font-medium">
+        <i class="fa-solid fa-check mr-1"></i>Salvo no slide
+      </span>
+    </div>
+
+    <!-- Tempo Inicial -->
+    <div class="mb-4">
+      <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
+        Duração da Contagem
+      </label>
+      <div class="grid grid-cols-2 gap-3">
+        <div class="bg-slate-800/90 border border-slate-700 rounded-xl p-2.5 flex flex-col items-center">
+          <span class="text-[11px] text-slate-400 mb-1">Minutos</span>
+          <div class="flex items-center gap-3">
+            <button onclick="adjustTime('min', -1)" class="w-7 h-7 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center font-bold">-</button>
+            <input id="inputMinutes" type="number" min="0" max="180" value="5" onchange="saveConfiguration()" class="w-14 bg-transparent text-center text-2xl font-bold mono-digits focus:outline-none">
+            <button onclick="adjustTime('min', 1)" class="w-7 h-7 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center font-bold">+</button>
+          </div>
+        </div>
+
+        <div class="bg-slate-800/90 border border-slate-700 rounded-xl p-2.5 flex flex-col items-center">
+          <span class="text-[11px] text-slate-400 mb-1">Segundos</span>
+          <div class="flex items-center gap-3">
+            <button onclick="adjustTime('sec', -5)" class="w-7 h-7 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center font-bold">-</button>
+            <input id="inputSeconds" type="number" min="0" max="59" value="0" onchange="saveConfiguration()" class="w-14 bg-transparent text-center text-2xl font-bold mono-digits focus:outline-none">
+            <button onclick="adjustTime('sec', 5)" class="w-7 h-7 rounded-lg bg-slate-700 hover:bg-slate-600 flex items-center justify-center font-bold">+</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Opções de Comportamento na Apresentação -->
+    <div class="space-y-2.5 mb-4">
+      <label class="flex items-center justify-between bg-slate-800/50 border border-slate-800 px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-slate-800 transition">
+        <div>
+          <span class="text-xs font-semibold block">Início Automático ao Apresentar</span>
+          <span class="text-[11px] text-slate-400">Dispara assim que entrar no modo apresentação</span>
+        </div>
+        <input id="checkAutoStart" type="checkbox" checked onchange="saveConfiguration()" class="w-4 h-4 accent-indigo-500 rounded cursor-pointer">
+      </label>
+
+      <label class="flex items-center justify-between bg-slate-800/50 border border-slate-800 px-3.5 py-2.5 rounded-xl cursor-pointer hover:bg-slate-800 transition">
+        <div>
+          <span class="text-xs font-semibold block">Barra de Progresso Visual</span>
+          <span class="text-[11px] text-slate-400">Exibe indicador colorido abaixo dos números</span>
+        </div>
+        <input id="checkShowProgress" type="checkbox" checked onchange="saveConfiguration()" class="w-4 h-4 accent-indigo-500 rounded cursor-pointer">
+      </label>
+    </div>
+
+    <!-- Tema Visual -->
+    <div>
+      <label class="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
+        Tema da Apresentação
+      </label>
+      <div class="grid grid-cols-3 gap-2">
+        <button onclick="selectTheme('dark')" id="themeBtn-dark" class="theme-btn border-2 border-indigo-500 bg-slate-950 text-white py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5">
+          <span class="w-2.5 h-2.5 rounded-full bg-indigo-400"></span> Escuro
+        </button>
+        <button onclick="selectTheme('light')" id="themeBtn-light" class="theme-btn border border-slate-700 bg-white text-slate-900 py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5">
+          <span class="w-2.5 h-2.5 rounded-full bg-indigo-600"></span> Claro
+        </button>
+        <button onclick="selectTheme('glass')" id="themeBtn-glass" class="theme-btn border border-slate-700 bg-slate-800/60 text-white py-2 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5">
+          <span class="w-2.5 h-2.5 rounded-full bg-cyan-400"></span> Transparente
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====================================================
+       2. MODO DE APRESENTAÇÃO (Exibido ao público no F5)
+       ==================================================== -->
+  <div id="presentationView" class="hidden w-full max-w-md rounded-3xl p-6 shadow-2xl transition-all flex flex-col items-center justify-center relative group">
+    
+    <!-- Etiqueta discreta superior (opcional/status) -->
+    <div id="presHeader" class="text-xs font-semibold uppercase tracking-widest opacity-60 mb-1">
+      Tempo Restante
+    </div>
+
+    <!-- Visor Gigante do Timer -->
+    <div id="timerDisplay" class="mono-digits text-7xl sm:text-8xl font-extrabold tracking-tight my-2 leading-none select-none">
+      05:00
+    </div>
+
+    <!-- Barra de Progresso -->
+    <div id="progressContainer" class="w-full h-2.5 bg-black/20 rounded-full overflow-hidden mt-3">
+      <div id="progressBar" class="h-full bg-indigo-500 transition-all duration-500" style="width: 100%;"></div>
+    </div>
+
+    <!-- Controles Discretos (Só aparecem se o apresentador passar o mouse por cima do timer) -->
+    <div class="opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center gap-2 mt-4">
+      <button id="btnPlayPause" onclick="togglePlayPause()" class="px-3.5 py-1.5 rounded-lg bg-white/15 hover:bg-white/25 backdrop-blur-md text-xs font-semibold flex items-center gap-1.5 transition">
+        <i id="iconPlayPause" class="fa-solid fa-pause"></i>
+        <span id="textPlayPause">Pausar</span>
+      </button>
+      <button onclick="resetPresentationTimer()" class="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 backdrop-blur-md text-xs font-semibold flex items-center gap-1.5 transition">
+        <i class="fa-solid fa-rotate-left"></i> Reiniciar
+      </button>
+    </div>
+  </div>
+
+  <script>
+    // Estado de Configuração Padrão
+    let config = {
+      minutes: 5,
+      seconds: 0,
+      autoStart: true,
+      showProgress: true,
+      theme: 'dark'
+    };
+
+    // Estado de Execução do Timer
+    let totalSeconds = 300;
+    let remainingSeconds = 300;
+    let timerInterval = null;
+    let isRunning = false;
+    let currentMode = 'edit'; // 'edit' ou 'read' (Apresentação)
+    let isInsideOffice = false;
+
+    // Elementos de UI
+    const editView = document.getElementById('editView');
+    const presentationView = document.getElementById('presentationView');
+    const inputMinutes = document.getElementById('inputMinutes');
+    const inputSeconds = document.getElementById('inputSeconds');
+    const checkAutoStart = document.getElementById('checkAutoStart');
+    const checkShowProgress = document.getElementById('checkShowProgress');
+    const timerDisplay = document.getElementById('timerDisplay');
+    const progressContainer = document.getElementById('progressContainer');
+    const progressBar = document.getElementById('progressBar');
+    const saveStatus = document.getElementById('saveStatus');
+    const browserSimulatorBar = document.getElementById('browserSimulatorBar');
+    const btnToggleSimulatedMode = document.getElementById('btnToggleSimulatedMode');
+
+    // =====================================================
+    // INICIALIZAÇÃO DO OFFICE.JS E DETECÇÃO DE MODO (F5)
+    // =====================================================
+    Office.onReady((info) => {
+      if (info.host === Office.HostType.PowerPoint) {
+        isInsideOffice = true;
+        browserSimulatorBar.classList.add('hidden'); // Esconde a barra de testes quando estiver no PowerPoint real
+
+        // 1. Carrega configurações salvas anteriormente neste slide
+        loadSavedConfiguration();
+
+        // 2. Verifica imediatamente se o arquivo abriu em Modo Edição ou Apresentação
+        checkPowerPointViewMode();
+
+        // 3. Escuta o evento de quando a pessoa entra ou sai do Modo Apresentação (F5 / ESC)
+        Office.context.document.addHandlerAsync(
+          Office.EventType.ActiveViewChanged,
+          onActiveViewChanged
+        );
+      } else {
+        // Caso esteja abrindo no navegador para testar
+        loadSavedConfiguration();
+        applyConfigToEditUI();
+      }
+    });
+
+    // Verifica qual é a visualização atual do PowerPoint
+    function checkPowerPointViewMode() {
+      Office.context.document.getActiveViewAsync((result) => {
+        if (result.status === Office.AsyncResultStatus.Succeeded) {
+          // result.value retorna "edit" (edição) ou "read" (apresentação de slides)
+          switchMode(result.value);
+        }
+      });
+    }
+
+    // Disparado automaticamente quando o usuário inicia ou encerra a apresentação
+    function onActiveViewChanged(args) {
+      checkPowerPointViewMode();
+    }
+
+    // Alterna entre a tela de Edição e a tela de Apresentação
+    function switchMode(mode) {
+      currentMode = mode;
+
+      if (mode === 'read') {
+        // Entrou em MODO DE APRESENTAÇÃO
+        editView.classList.add('hidden');
+        presentationView.classList.remove('hidden');
+
+        applyPresentationTheme();
+        resetPresentationTimer();
+
+        if (config.autoStart) {
+          startPresentationTimer();
+        }
+      } else {
+        // Voltou para MODO DE EDIÇÃO
+        pausePresentationTimer();
+        presentationView.classList.add('hidden');
+        editView.classList.remove('hidden');
+        applyConfigToEditUI();
+      }
+    }
+
+    // =====================================================
+    // PERSISTÊNCIA DAS CONFIGURAÇÕES NO ARQUIVO PPTX
+    // =====================================================
+    function saveConfiguration() {
+      config.minutes = Math.max(0, Math.min(180, parseInt(inputMinutes.value) || 0));
+      config.seconds = Math.max(0, Math.min(59, parseInt(inputSeconds.value) || 0));
+      config.autoStart = checkAutoStart.checked;
+      config.showProgress = checkShowProgress.checked;
+
+      inputMinutes.value = config.minutes;
+      inputSeconds.value = config.seconds;
+
+      // Salva no LocalStorage para testes no navegador
+      localStorage.setItem('ppt_timer_config', JSON.stringify(config));
+
+      // Salva dentro do próprio documento do PowerPoint se estiver rodando no Office
+      if (isInsideOffice && Office.context && Office.context.document && Office.context.document.settings) {
+        Office.context.document.settings.set('ppt_timer_config', config);
+        Office.context.document.settings.saveAsync(() => {
+          flashSaveBadge();
+        });
+      } else {
+        flashSaveBadge();
+      }
+    }
+
+    function loadSavedConfiguration() {
+      if (isInsideOffice && Office.context && Office.context.document && Office.context.document.settings) {
+        const saved = Office.context.document.settings.get('ppt_timer_config');
+        if (saved) {
+          config = { ...config, ...saved };
+        }
+      } else {
+        const localSaved = localStorage.getItem('ppt_timer_config');
+        if (localSaved) {
+          config = { ...config, ...JSON.parse(localSaved) };
+        }
+      }
+      applyConfigToEditUI();
+    }
+
+    function applyConfigToEditUI() {
+      inputMinutes.value = config.minutes;
+      inputSeconds.value = config.seconds;
+      checkAutoStart.checked = config.autoStart;
+      checkShowProgress.checked = config.showProgress;
+      selectTheme(config.theme, false);
+    }
+
+    function flashSaveBadge() {
+      saveStatus.innerHTML = '<i class="fa-solid fa-rotate fa-spin mr-1"></i>Salvando...';
+      setTimeout(() => {
+        saveStatus.innerHTML = '<i class="fa-solid fa-check mr-1"></i>Salvo no slide';
+      }, 400);
+    }
+
+    function adjustTime(unit, delta) {
+      if (unit === 'min') {
+        let next = (parseInt(inputMinutes.value) || 0) + delta;
+        inputMinutes.value = Math.max(0, Math.min(180, next));
+      } else {
+        let next = (parseInt(inputSeconds.value) || 0) + delta;
+        if (next >= 60) next = 55;
+        if (next < 0) next = 0;
+        inputSeconds.value = next;
+      }
+      saveConfiguration();
+    }
+
+    function selectTheme(themeName, shouldSave = true) {
+      config.theme = themeName;
+      document.querySelectorAll('.theme-btn').forEach(btn => {
+        btn.classList.remove('border-2', 'border-indigo-500');
+        btn.classList.add('border', 'border-slate-700');
+      });
+      const activeBtn = document.getElementById(`themeBtn-${themeName}`);
+      if (activeBtn) {
+        activeBtn.classList.remove('border', 'border-slate-700');
+        activeBtn.classList.add('border-2', 'border-indigo-500');
+      }
+      if (shouldSave) saveConfiguration();
+    }
+
+    // =====================================================
+    // MOTOR DO TIMER NO MODO APRESENTAÇÃO
+    // =====================================================
+    function applyPresentationTheme() {
+      presentationView.className = 'w-full max-w-md rounded-3xl p-6 transition-all flex flex-col items-center justify-center relative group';
+
+      if (config.theme === 'dark') {
+        presentationView.classList.add('bg-slate-900', 'text-white', 'border', 'border-slate-700/80', 'shadow-2xl');
+      } else if (config.theme === 'light') {
+        presentationView.classList.add('bg-white', 'text-slate-900', 'border', 'border-slate-200', 'shadow-2xl');
+      } else if (config.theme === 'glass') {
+        presentationView.classList.add('bg-slate-900/40', 'backdrop-blur-md', 'text-white', 'border', 'border-white/20');
+      }
+
+      if (config.showProgress) {
+        progressContainer.classList.remove('hidden');
+      } else {
+        progressContainer.classList.add('hidden');
+      }
+    }
+
+    function updateTimerScreen() {
+      const mins = Math.floor(remainingSeconds / 60);
+      const secs = remainingSeconds % 60;
+      timerDisplay.textContent = `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+
+      // Atualiza barra de progresso
+      const pct = totalSeconds > 0 ? (remainingSeconds / totalSeconds) * 100 : 0;
+      progressBar.style.width = `${pct}%`;
+
+      // Mudança automática de cor quando o tempo está acabando
+      timerDisplay.classList.remove('text-rose-500', 'urgent-blink', 'text-amber-400');
+      progressBar.classList.remove('bg-indigo-500', 'bg-amber-400', 'bg-rose-500');
+
+      if (remainingSeconds === 0) {
+        timerDisplay.classList.add('text-rose-500', 'urgent-blink');
+        progressBar.classList.add('bg-rose-500');
+        document.getElementById('presHeader').textContent = 'Tempo Esgotado!';
+      } else if (remainingSeconds <= 30) {
+        timerDisplay.classList.add('text-amber-400');
+        progressBar.classList.add('bg-amber-400');
+        document.getElementById('presHeader').textContent = 'Reta Final';
+      } else {
+        progressBar.classList.add('bg-indigo-500');
+        document.getElementById('presHeader').textContent = 'Tempo Restante';
+      }
+    }
+
+    function startPresentationTimer() {
+      if (timerInterval) clearInterval(timerInterval);
+      isRunning = true;
+      updatePlayPauseButtonUI();
+
+      timerInterval = setInterval(() => {
+        if (remainingSeconds > 0) {
+          remainingSeconds--;
+          updateTimerScreen();
+        } else {
+          pausePresentationTimer();
+        }
+      }, 1000);
+    }
+
+    function pausePresentationTimer() {
+      if (timerInterval) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+      }
+      isRunning = false;
+      updatePlayPauseButtonUI();
+    }
+
+    function resetPresentationTimer() {
+      pausePresentationTimer();
+      totalSeconds = (config.minutes * 60) + config.seconds;
+      remainingSeconds = totalSeconds;
+      updateTimerScreen();
+    }
+
+    function togglePlayPause() {
+      if (isRunning) {
+        pausePresentationTimer();
+      } else {
+        if (remainingSeconds === 0) {
+          resetPresentationTimer();
+        }
+        startPresentationTimer();
+      }
+    }
+
+    function updatePlayPauseButtonUI() {
+      const icon = document.getElementById('iconPlayPause');
+      const text = document.getElementById('textPlayPause');
+      if (isRunning) {
+        icon.className = 'fa-solid fa-pause';
+        text.textContent = 'Pausar';
+      } else {
+        icon.className = 'fa-solid fa-play';
+        text.textContent = 'Continuar';
+      }
+    }
+
+    // Botão do Simulador para testar sem precisar abrir o PowerPoint
+    btnToggleSimulatedMode.addEventListener('click', () => {
+      if (currentMode === 'edit') {
+        switchMode('read');
+        btnToggleSimulatedMode.textContent = 'Voltar ao Modo Edição (ESC)';
+        btnToggleSimulatedMode.classList.replace('bg-amber-500', 'bg-emerald-400');
+      } else {
+        switchMode('edit');
+        btnToggleSimulatedMode.textContent = 'Simular Modo Apresentação (F5)';
+        btnToggleSimulatedMode.classList.replace('bg-emerald-400', 'bg-amber-500');
+      }
+    });
+  </script>
+</body>
+</html>
